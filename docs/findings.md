@@ -95,6 +95,61 @@ in that order of size:
 5. Memory, 40-46 GB private: lists' allocators 9 GB, windows 7, uploads 4
    (`VICTORY_MEMORY_MAP=1` lists it).
 
+## Upstream fixes taken after the fork's base (2026-11-25)
+
+Thirty commits from Marvisak/VIctory that postdate this fork's base are in
+this tree, with their authors and source commits kept. Another, a
+scalar-quadmask test, was tried and reverted: the fork already had that test.
+The CLI's zero-worker check was adapted to this fork's `--list` option.
+They are fixes and
+tests that met the same code here: a null CBV description now clears the slot
+instead of leaving a stale view; a typed unordered view in a format the host
+cannot store to is refused; placed descriptor heaps are released before their
+test memory is reused; HDR and 8-bit captures keep NaNs, integer contrast and
+their alpha range; a failed XAsync call runs its cleanup without the
+completion lock; xmem keeps the space below 4 GiB for the title's 32-bit
+allocations; a cache-publish race accepts the existing entry; unreadable
+files are reported by `victory census`; a policy violation makes
+`victory config` exit nonzero; crash reports are appended as whole records;
+password text entry is masked; whole-wave `v_add_f16` inline constants are
+decoded; `--jobs 0` is refused by the CLI; and an all-zero report from a
+wireless receiver is not taken for a connected pad, and the early pipeline
+list makes room by dropping the oldest runs' keys rather than arbitrary ones,
+a module name that fits clears the last error, a pipeline stream's bytecode is
+read without assuming alignment, and capture output directories are created
+if missing; and a shader a run translates is handed back from the translation
+instead of being read out of the entry just written, and a pipeline-library
+save buffer the host cannot allocate is refused instead of aborting the run.
+The rest are new tests for the shader translator, XMA, BC1, sampler filters,
+fences, the loader's `clzero` edge cases and the census.
+
+Not taken: patches whose code this fork does not carry (the page table and
+`alias_source`, `Tracked::saved`, `shared_texture`, pipeline stream reads),
+Belobug's shader clean-up passes. They need ports of their own, not a
+cherry-pick.
+
+None of these changes was measured on the 7900 XTX. They are
+correctness fixes and tests, kept behind the code paths they touch; the
+Windows CI is their check until they are run in the title.
+
+Three more were carried over by hand where the fork's code had moved on:
+`committed_by_query` now refuses a wrapping range, a committed page without
+read access and a query that does not advance, as in Marvisak 4fc9d70f (the
+`Staging::detile` half of that fix was already here); a failed swap chain
+creation or resize waits a second before asking DXGI again, with success
+clearing the wait, as in Marvisak f0967745; and fxceless' `VICTORY_ABSENT_ONCE`
+is in, adapted to this tree's published-bit guards. Off by default, it keeps
+a 100 ms note (`VICTORY_ABSENT_MS`) of a block Windows said is uncommitted, so
+the submitting thread does not ask about it every frame; a mapping the
+runtime tells of clears the note at once. `VICTORY_ABSENT_ONCE=alt` switches
+between twenty seconds on and twenty off, and says the question counts at
+each change. Like fxceless' own test, ours is a device-free test on our own
+placeholders: it has not been run in the title.
+
+Marvisak's exit-status fix is carried over too: `victory run --execute` now
+passes the title's full 32-bit exit status through to the shell instead of
+always reporting success; not executing still reports zero.
+
 ## The other repositories, compared
 
 Read up to 2026-11-25: Marvisak/VIctory, fxceless/victory-fork, DexNom/VIctory,

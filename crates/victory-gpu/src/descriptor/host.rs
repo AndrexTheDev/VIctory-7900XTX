@@ -3783,6 +3783,16 @@ fn fits(texture: &ID3D12Resource, mut format: Option<&mut DXGI_FORMAT>, unordere
         format.0 = linear as i32;
     }
     let view = format.as_ref().map_or(0, |f| f.0 as u32);
+    // A typed unordered view in a format the host cannot store to
+    // (B5G5R5A1_UNORM on NVIDIA) removes the device when made, in the
+    // texture's own format too: the slot stays null, its writes dropped.
+    // The format checked is the one the view is made in: a typed
+    // texture's own unless the requested one is castable (below).
+    let typed = if view == 0 || (!typeless && !castable.contains(&view)) { own } else { view };
+    if unordered && !(view == 0 && typeless) && !typed_store(typed) {
+        once!(view = typed, own, "an unordered view in a format the host cannot store");
+        return false;
+    }
     if view == 0 {
         return !typeless;
     }
@@ -4069,7 +4079,7 @@ fn make_twinned(
             Some(None)
         }
         View::ConsoleSampler(words) => {
-            let desc = crate::sampler::console(words);
+            let desc = crate::sampler::console(words, crate::sampler::aniso_point_mip(device));
             // SAFETY: a slot of our sampler heap.
             unsafe { device.CreateSampler(&desc, at) };
             Some(None)

@@ -684,6 +684,39 @@ fn subobject(kind: u32) -> Option<(usize, Option<&'static str>)> {
     }
 }
 
+/// Walks a title's stream of pipeline subobjects, handing each shader's
+/// bytecode and each subobject to the caller. The stream is only a byte
+/// range: neither its start nor a subobject's bytecode is aligned.
+fn read_stream(
+    stream: *const u8,
+    size: usize,
+    mut shader: impl FnMut(&'static str, &Bytecode),
+    mut state: impl FnMut(u32, *const u8),
+) {
+    let mut at = 0;
+    while at + 8 <= size {
+        // SAFETY: inside the stream the title passes.
+        let kind = unsafe { stream.add(at).cast::<u32>().read_unaligned() };
+        let Some((bytes, stage)) = subobject(kind) else {
+            tracing::warn!(
+                kind,
+                at,
+                "pipeline subobject of unknown size; the rest is ignored"
+            );
+            break;
+        };
+        if let Some(stage) = stage {
+            // SAFETY: a shader subobject has its bytecode at +8; the bytes
+            // behind `stream` do not promise that it is aligned.
+            let code = unsafe { stream.add(at + 8).cast::<Bytecode>().read_unaligned() };
+            shader(stage, &code);
+        }
+        // SAFETY: a whole subobject of this kind lies at `at`.
+        state(kind, unsafe { stream.add(at) });
+        at += bytes;
+    }
+}
+
 /// Device method: a pipeline from a stream; the shaders are kept, and the
 /// graphics state for the host pipeline.
 pub(crate) extern "system" fn create_stream(
@@ -702,30 +735,16 @@ pub(crate) extern "system" fn create_stream(
     let mut shaders = Vec::new();
     #[cfg(windows)]
     let mut graphics = host::GraphicsState::default();
-    let mut at = 0;
-    while at + 8 <= desc.size {
-        // SAFETY: inside the stream the title passes.
-        let kind = unsafe { desc.stream.add(at).cast::<u32>().read_unaligned() };
-        let Some((size, stage)) = subobject(kind) else {
-            tracing::warn!(
-                kind,
-                at,
-                "pipeline subobject of unknown size; the rest is ignored"
-            );
-            break;
-        };
-        if let Some(stage) = stage {
-            // SAFETY: a shader subobject has its bytecode at +8.
-            let code = unsafe { &*desc.stream.add(at + 8).cast::<Bytecode>() };
-            shaders.extend(copy(stage, code));
-        }
-        #[cfg(windows)]
-        // SAFETY: a whole subobject of this kind lies at `at`.
-        unsafe {
-            graphics.read(kind, desc.stream.add(at))
-        };
-        at += size;
-    }
+    #[cfg(windows)]
+    let state = |kind: u32, at: *const u8| unsafe { graphics.read(kind, at) };
+    #[cfg(not(windows))]
+    let state = |_: u32, _: *const u8| {};
+    read_stream(
+        desc.stream,
+        desc.size,
+        |stage, code| shaders.extend(copy(stage, code)),
+        state,
+    );
     hand_out(
         shaders,
         #[cfg(windows)]
@@ -802,6 +821,30 @@ mod tests {
 
     use super::*;
     use crate::object::{S_OK, slot};
+
+    /// A title's stream need not be 8-aligned: its bytecode is read as it
+    /// lies, without a reference that promises alignment.
+    #[test]
+    fn a_stream_of_any_alignment_is_read() {
+        let mut backing = [0u64; 5];
+        // SAFETY: the 40 bytes of `backing`, one past its aligned start.
+        let stream = unsafe { backing.as_mut_ptr().cast::<u8>().add(1) };
+        // SAFETY: inside `backing`, unaligned writes by design.
+        unsafe {
+            stream.cast::<u32>().write_unaligned(1); // vertex shader
+            stream.add(8).cast::<usize>().write_unaligned(0x1000);
+            stream.add(16).cast::<usize>().write_unaligned(7);
+        }
+        assert_ne!(stream as usize % 8, 0);
+        let seen = std::cell::RefCell::new(Vec::new());
+        read_stream(
+            stream,
+            32,
+            |stage, code| seen.borrow_mut().push((stage, code.code as usize, code.size)),
+            |_, _| {},
+        );
+        assert_eq!(*seen.borrow(), [("vertex", 0x1000, 7)]);
+    }
 
     fn shaders(p: This) -> Vec<(&'static str, Vec<u8>)> {
         pipeline(p)

@@ -47,7 +47,7 @@
 //! 16,352 of 16,384 pages read zeros with the handle closed, none with it
 //! open (the test below). `VICTORY_LIBRARY_HANDLE=0`: closed, as before.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, RwLock};
@@ -617,7 +617,7 @@ pub(crate) fn save(now: bool) {
     };
     // Through `used`: a process that asked for none yet (`victory shaders`)
     // must not write the earlier runs' list over with nothing.
-    let used: Vec<String> = used().iter().flatten().cloned().collect();
+    let used: Vec<String> = used().as_ref().map(Used::list).unwrap_or_default();
     let library_written = if bytes > 0 { replace_library(dir, &tmp) } else { Ok(()) };
     if bytes > 0 && library_written.is_ok() {
         // In place unless the system refused and the new one waits beside it.
@@ -663,10 +663,22 @@ fn serialise(library: &ID3D12PipelineLibrary1, tmp: &std::path::Path, size: usiz
         // SAFETY: a buffer of the size the library asks for.
         return unsafe { library.Serialize(file.bytes_mut()) }.map_err(failed);
     }
-    let mut bytes = vec![0u8; size];
+    let mut bytes = zeroed(size)?;
     // SAFETY: a buffer of the size the library asks for.
     unsafe { library.Serialize(&mut bytes) }.map_err(failed)?;
     std::fs::write(tmp, &bytes)
+}
+
+/// `n` zero bytes, or an error when the host has no memory for them. A
+/// library is about 1.7 GB on some adapters; an infallible allocation that
+/// large aborted the whole run mid-game.
+fn zeroed(n: usize) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(n).map_err(|_| {
+        std::io::Error::other(format!("no memory to serialise the pipeline library ({n} bytes)"))
+    })?;
+    bytes.resize(n, 0);
+    Ok(bytes)
 }
 
 /// Renames the written library `tmp` over the library's file in `dir`. This
@@ -740,20 +752,55 @@ pub(crate) fn note_time(key: &str, ms: u64) {
     }
 }
 
-/// Title pipeline keys requested by draws or dispatches (this run and the last).
-static USED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+/// Title pipeline keys requested by draws or dispatches (this run and the
+/// last). The earlier keys keep their place in the list as loaded, so a full
+/// list drops the oldest runs' keys instead of whichever a set happens to
+/// yield.
+static USED: Mutex<Option<Used>> = Mutex::new(None);
 static USED_CHANGED: AtomicBool = AtomicBool::new(false);
 
-fn used() -> std::sync::MutexGuard<'static, Option<HashSet<String>>> {
+#[derive(Default)]
+struct Used {
+    /// Each earlier key with its place in the list as loaded: the list is
+    /// kept most recent run first, so a lower place is a more recent run.
+    before: HashMap<String, usize>,
+    now: HashSet<String>,
+}
+
+impl Used {
+    /// The list as saved: one key a line, most recent run first (a list in
+    /// no order, as earlier builds saved it, reads as well).
+    fn read(listed: &str) -> Used {
+        let mut before = HashMap::new();
+        for (place, key) in listed.lines().filter(|l| !l.is_empty()).enumerate() {
+            before.entry(key.to_owned()).or_insert(place);
+        }
+        Used { before, now: HashSet::new() }
+    }
+
+    /// The list to keep: this run's keys, then earlier runs' others, most
+    /// recent first, at most `EARLY_MAX` (the oldest go once it is full).
+    fn list(&self) -> Vec<String> {
+        let mut earlier: Vec<_> = self.before.iter().filter(|(k, _)| !self.now.contains(*k)).collect();
+        earlier.sort_unstable_by_key(|&(_, &place)| place);
+        self.now.iter().chain(earlier.into_iter().map(|(k, _)| k)).take(EARLY_MAX).cloned().collect()
+    }
+
+    fn contains(&self, key: &str) -> bool {
+        self.now.contains(key) || self.before.contains_key(key)
+    }
+}
+
+fn used() -> std::sync::MutexGuard<'static, Option<Used>> {
     let mut used = USED.lock().unwrap_or_else(|e| e.into_inner());
     if used.is_none() {
         let listed = DIR
             .get()
             .and_then(|d| std::fs::read_to_string(d.join(EARLY_FILE)).ok())
             .unwrap_or_default();
-        let set: HashSet<String> = listed.lines().filter(|l| !l.is_empty()).map(str::to_owned).collect();
-        tracing::info!(pipelines = set.len(), "title pipelines to start early");
-        *used = Some(set);
+        let read = Used::read(&listed);
+        tracing::info!(pipelines = read.before.len(), "title pipelines to start early");
+        *used = Some(read);
     }
     used
 }
@@ -768,14 +815,14 @@ pub(crate) fn wanted_early(key: &str) -> bool {
     if *ALL.get_or_init(|| std::env::var_os("VICTORY_EARLY_ALL").is_some_and(|v| v == "1")) {
         return true;
     }
-    used().as_ref().is_some_and(|s| s.contains(key))
+    used().as_ref().is_some_and(|u| u.contains(key))
 }
 
 /// A draw or dispatch requested the title pipeline with `key`.
 pub(crate) fn note_used(key: &str) {
     let mut used = used();
-    let set = used.get_or_insert_with(HashSet::new);
-    if set.len() < EARLY_MAX && set.insert(key.to_owned()) {
+    let now = &mut used.get_or_insert_default().now;
+    if now.insert(key.to_owned()) {
         USED_CHANGED.store(true, Ordering::Relaxed);
     }
 }
@@ -783,6 +830,14 @@ pub(crate) fn note_used(key: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A size the host cannot give is an error, not a process abort; others
+    /// are zeros.
+    #[test]
+    fn a_save_buffer_the_host_cannot_give_is_refused() {
+        assert!(zeroed(usize::MAX / 2).is_err());
+        assert_eq!(zeroed(100).unwrap(), vec![0u8; 100]);
+    }
 
     #[test]
     fn names_change_with_what_goes_into_the_pipeline() {
@@ -930,5 +985,26 @@ mod tests {
         let final_bytes = std::fs::read(&target).unwrap();
         assert_eq!(final_bytes.len(), 4096);
         assert!(final_bytes.iter().all(|&b| b == final_bytes[0]));
+    }
+
+    /// A full list makes room by the oldest runs' keys, and keeps that
+    /// order across saves.
+    #[test]
+    fn a_full_early_list_drops_the_oldest_runs_keys() {
+        let key = |i: usize| format!("{i:032x}");
+        // As saved: the last run's keys, then the run before's.
+        let saved: Vec<String> = (0..EARLY_MAX).map(key).collect();
+        let mut used = Used::read(&saved.join("\n"));
+        used.now = (EARLY_MAX..EARLY_MAX + 10).map(key).collect();
+        // The oldest key is used again: it must stay, as this run's.
+        used.now.insert(key(EARLY_MAX - 1));
+        let list = used.list();
+        assert_eq!(list.len(), EARLY_MAX);
+        assert!(used.now.iter().all(|k| list.contains(k)));
+        let dropped: HashSet<String> = (EARLY_MAX - 11..EARLY_MAX - 1).map(key).collect();
+        assert!(list.iter().all(|k| !dropped.contains(k)));
+        let again = Used::read(&list.join("\n"));
+        assert!(used.now.iter().all(|k| again.before[k] < used.now.len()));
+        assert!(again.before[&key(0)] < again.before[&key(1)]);
     }
 }

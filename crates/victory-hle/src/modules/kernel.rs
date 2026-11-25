@@ -98,9 +98,13 @@ fn copy_truncated<T: Copy + Default>(text: &[T], out: &mut [T]) -> u32 {
         host::set_last_error(ERROR_INSUFFICIENT_BUFFER);
         return out.len() as u32;
     }
+    // A name that fits clears the last error, as the host does: titles tell
+    // a whole name from a truncated one by it.
+    host::set_last_error(ERROR_SUCCESS);
     n as u32
 }
 
+const ERROR_SUCCESS: u32 = 0;
 const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
 
 /// Console-only DLLs we implement load as a pseudo handle (titles load
@@ -718,6 +722,16 @@ mod tests {
         let mut small = [0u8; 4];
         assert_eq!(GetModuleFileNameA(module, small.as_mut_ptr(), 4), 4);
         assert_eq!(&small, &[b'C', b':', b'\\', 0]);
+
+        #[cfg(windows)]
+        {
+            // SAFETY: reads this thread's last error.
+            let last_error = || unsafe { windows_sys::Win32::Foundation::GetLastError() };
+            // SAFETY: sets this thread's last error.
+            unsafe { windows_sys::Win32::Foundation::SetLastError(ERROR_INSUFFICIENT_BUFFER) };
+            assert_eq!(GetModuleFileNameW(module, buf.as_mut_ptr(), buf.len() as u32), n);
+            assert_eq!(last_error(), ERROR_SUCCESS, "a name that fits clears the error");
+        }
     }
 
     /// The title's arguments come right after the program, and the list ends
@@ -766,7 +780,10 @@ mod tests {
         );
         // Host DLLs outside the host policy do not exist for the title.
         assert!(LoadLibraryW(w("wininet.dll").as_ptr()).is_null());
-        assert!(LoadLibraryA(c"C:\\Windows\\System32\\urlmon".as_ptr().cast()).is_null());
+        // By its full path too: the host's own, or the load would fail whatever the policy says.
+        let urlmon = std::env::var("SystemRoot").unwrap() + r"\System32\urlmon";
+        let urlmon = std::ffi::CString::new(urlmon).unwrap();
+        assert!(LoadLibraryA(urlmon.as_ptr().cast()).is_null());
         assert!(GetModuleHandleW(w("WININET.DLL").as_ptr()).is_null());
         assert_eq!(
             // SAFETY: reads this thread's last error.

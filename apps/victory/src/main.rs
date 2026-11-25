@@ -13,6 +13,7 @@ mod translate;
 #[cfg(windows)]
 mod warm;
 
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -85,9 +86,9 @@ enum Command {
         /// Print one line per program and outcome.
         #[arg(long)]
         list: bool,
-        /// Worker threads (default: every logical core).
+        /// Positive worker thread count (default: every logical core).
         #[arg(long)]
-        jobs: Option<usize>,
+        jobs: Option<NonZeroUsize>,
         /// Warm the run's shader cache: a file of shader hashes (the 16
         /// hex digits a run's log names a shader by, anywhere in a line);
         /// the containers with those hashes are translated into the
@@ -101,9 +102,9 @@ enum Command {
     /// of the translator.
     Shaders {
         paths: Vec<PathBuf>,
-        /// Worker threads (default: every logical core).
+        /// Positive worker thread count (default: every logical core).
         #[arg(long)]
-        jobs: Option<usize>,
+        jobs: Option<NonZeroUsize>,
     },
     /// Make the host pipelines of every pipeline the title ever created
     /// (runs with `VICTORY_PIPELINE_BOOK=1` write them down), so that the
@@ -111,9 +112,9 @@ enum Command {
     /// of the translator or the driver. Goes on where it was stopped.
     #[cfg(windows)]
     Warm {
-        /// Processes at once (default: two thirds of the logical cores).
+        /// Positive number of processes at once (default: two thirds of the logical cores).
         #[arg(long)]
-        jobs: Option<usize>,
+        jobs: Option<NonZeroUsize>,
         /// At most this many pipelines.
         #[arg(long)]
         limit: Option<usize>,
@@ -209,13 +210,13 @@ fn main() -> Result<()> {
                 victory_shader::emit::set_host_max_wave(n);
             }
             if let Some(file) = warm {
-                return translate::warm(paths, &file, jobs);
+                return translate::warm(paths, &file, jobs.map(NonZeroUsize::get));
             }
-            translate::run(paths, validate, pipelines, list, jobs)
+            translate::run(paths, validate, pipelines, list, jobs.map(NonZeroUsize::get))
         }
-        Command::Shaders { paths, jobs } => translate::precompile(paths, jobs),
+        Command::Shaders { paths, jobs } => translate::precompile(paths, jobs.map(NonZeroUsize::get)),
         #[cfg(windows)]
-        Command::Warm { jobs, limit, again, used, these } => warm::run(jobs, limit, again, used, these),
+        Command::Warm { jobs, limit, again, used, these } => warm::run(jobs.map(NonZeroUsize::get), limit, again, used, these),
         Command::Run {
             exe,
             unimplemented,
@@ -225,7 +226,12 @@ fn main() -> Result<()> {
             title_args,
         } => {
             victory_hle::runtime::set_title_args(title_args);
-            run::run(&exe, unimplemented, strict, execute, console)
+            let code = run::run(&exe, unimplemented, strict, execute, console)?;
+            if code != 0 {
+                // Preserve all 32 bits of the Windows process status.
+                std::process::exit(code as i32);
+            }
+            Ok(())
         }
         #[cfg(all(windows, feature = "diagnostics"))]
         Command::Replay(options) => replay::run(options),
@@ -252,6 +258,13 @@ fn show_config() -> Result<()> {
     for t in &cfg.test_titles {
         println!("test_title  : {}", status(&Some(t.clone())));
     }
+    check_policy(&cfg)
+}
+
+/// Reports each configured path the asset policy refuses, and fails if
+/// there is one, so that `victory config` exits nonzero.
+fn check_policy(cfg: &victory_core::Config) -> Result<()> {
+    let mut violations = 0;
     for p in cfg
         .game_dir
         .iter()
@@ -260,8 +273,13 @@ fn show_config() -> Result<()> {
     {
         if let Err(e) = victory_core::ensure_outside_repo(p) {
             println!("POLICY VIOLATION: {e}");
+            violations += 1;
         }
     }
+    anyhow::ensure!(
+        violations == 0,
+        "{violations} configured path(s) violate the asset policy"
+    );
     Ok(())
 }
 
@@ -277,4 +295,37 @@ pub(crate) fn default_paths(paths: Vec<PathBuf>) -> Result<Vec<PathBuf>> {
         "no paths given and none configured (see victory.example.toml)"
     );
     Ok(all)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::check_policy;
+
+    fn outside() -> PathBuf {
+        std::env::temp_dir().join("victory-config-test")
+    }
+
+    #[test]
+    fn config_check_passes_paths_outside_the_repository() {
+        let cfg = victory_core::Config {
+            cache_dir: outside().join("cache"),
+            data_dir: outside().join("data"),
+            ..Default::default()
+        };
+        assert!(check_policy(&cfg).is_ok());
+    }
+
+    #[test]
+    fn config_check_fails_a_path_inside_the_repository() {
+        let cfg = victory_core::Config {
+            game_dir: Some(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("game")),
+            cache_dir: outside().join("cache"),
+            data_dir: outside().join("data"),
+            ..Default::default()
+        };
+        let err = check_policy(&cfg).unwrap_err();
+        assert!(err.to_string().contains("1 configured path"), "{err}");
+    }
 }
