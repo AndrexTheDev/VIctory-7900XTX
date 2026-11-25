@@ -663,10 +663,22 @@ fn serialise(library: &ID3D12PipelineLibrary1, tmp: &std::path::Path, size: usiz
         // SAFETY: a buffer of the size the library asks for.
         return unsafe { library.Serialize(file.bytes_mut()) }.map_err(failed);
     }
-    let mut bytes = vec![0u8; size];
+    let mut bytes = zeroed(size)?;
     // SAFETY: a buffer of the size the library asks for.
     unsafe { library.Serialize(&mut bytes) }.map_err(failed)?;
     std::fs::write(tmp, &bytes)
+}
+
+/// `n` zero bytes, or an error when the host has no memory for them. A
+/// library is about 1.7 GB on some adapters; an infallible allocation that
+/// large aborted the whole run mid-game.
+fn zeroed(n: usize) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(n).map_err(|_| {
+        std::io::Error::other(format!("no memory to serialise the pipeline library ({n} bytes)"))
+    })?;
+    bytes.resize(n, 0);
+    Ok(bytes)
 }
 
 /// Renames the written library `tmp` over the library's file in `dir`. This
@@ -818,6 +830,14 @@ pub(crate) fn note_used(key: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A size the host cannot give is an error, not a process abort; others
+    /// are zeros.
+    #[test]
+    fn a_save_buffer_the_host_cannot_give_is_refused() {
+        assert!(zeroed(usize::MAX / 2).is_err());
+        assert_eq!(zeroed(100).unwrap(), vec![0u8; 100]);
+    }
 
     #[test]
     fn names_change_with_what_goes_into_the_pipeline() {

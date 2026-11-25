@@ -118,9 +118,10 @@ list makes room by dropping the oldest runs' keys rather than arbitrary ones,
 a module name that fits clears the last error, a pipeline stream's bytecode is
 read without assuming alignment, and capture output directories are created
 if missing; and a shader a run translates is handed back from the translation
-instead of being read out of the entry just written. The rest are new tests
-for the shader translator, XMA, BC1, sampler filters, fences, the loader's
-`clzero` edge cases and the census.
+instead of being read out of the entry just written, and a pipeline-library
+save buffer the host cannot allocate is refused instead of aborting the run.
+The rest are new tests for the shader translator, XMA, BC1, sampler filters,
+fences, the loader's `clzero` edge cases and the census.
 
 Not taken: patches whose code this fork does not carry (the page table and
 `alias_source`, `Tracked::saved`, `shared_texture`, pipeline stream reads),
