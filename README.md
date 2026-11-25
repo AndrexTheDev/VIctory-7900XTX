@@ -50,6 +50,14 @@ cargo build --locked --profile diag -p victory --features diagnostics
 scripts\play.ps1 -Exe <path of your copy's executable>
 ```
 
+Keep the build paths short. From a checkout about 170 characters deep, the
+`blake3` dependency's build script fails in `ml64.exe` with
+`A1009: line too long`, even with long paths enabled in Windows, because its
+object files land under `target`. Set `CARGO_TARGET_DIR` to a short absolute
+path (`$env:CARGO_TARGET_DIR = 'C:\vt'`; `victory.exe` is then in
+`C:\vt\release` rather than `target\release`), or check out the repository
+nearer the drive's root.
+
 `scripts\play.ps1 -Safe` leaves out the newest, faster ways; try it first when
 something is wrong. `-RayTracing` turns the title's ray-traced indirect light on.
 
