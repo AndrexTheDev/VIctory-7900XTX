@@ -97,9 +97,10 @@ in that order of size:
 
 ## Upstream fixes taken after the fork's base (2026-11-25)
 
-Twenty-nine commits from Marvisak/VIctory that postdate this fork's base are
-in this tree, with their authors and source commits kept. A thirtieth, a
+Thirty commits from Marvisak/VIctory that postdate this fork's base are in
+this tree, with their authors and source commits kept. Another, a
 scalar-quadmask test, was tried and reverted: the fork already had that test.
+The CLI's zero-worker check was adapted to this fork's `--list` option.
 They are fixes and
 tests that met the same code here: a null CBV description now clears the slot
 instead of leaving a stale view; a typed unordered view in a format the host
@@ -110,9 +111,10 @@ completion lock; xmem keeps the space below 4 GiB for the title's 32-bit
 allocations; a cache-publish race accepts the existing entry; unreadable
 files are reported by `victory census`; a policy violation makes
 `victory config` exit nonzero; crash reports are appended as whole records;
-password text entry is masked; and whole-wave `v_add_f16` inline constants
-are decoded. The rest are new tests for the shader translator, XMA, BC1,
-sampler filters, fences, the loader's `clzero` edge cases and the census.
+password text entry is masked; whole-wave `v_add_f16` inline constants are
+decoded; and `--jobs 0` is refused by the CLI. The rest are new tests for the
+shader translator, XMA, BC1, sampler filters, fences, the loader's `clzero`
+edge cases and the census.
 
 Not taken: patches whose code this fork does not carry (the page table and
 `alias_source`, `Tracked::saved`, `shared_texture`, pipeline stream reads),
