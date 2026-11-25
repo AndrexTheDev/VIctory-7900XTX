@@ -124,6 +124,13 @@ None of these changes was measured on the 7900 XTX. They are
 correctness fixes and tests, kept behind the code paths they touch; the
 Windows CI is their check until they are run in the title.
 
+Two more were carried over by hand where the fork's code had moved on:
+`committed_by_query` now refuses a wrapping range, a committed page without
+read access and a query that does not advance, as in Marvisak 4fc9d70f (the
+`Staging::detile` half of that fix was already here); and a failed swap chain
+creation or resize waits a second before asking DXGI again, with success
+clearing the wait, as in Marvisak f0967745.
+
 ## The other repositories, compared
 
 Read up to 2026-11-25: Marvisak/VIctory, fxceless/victory-fork, DexNom/VIctory,

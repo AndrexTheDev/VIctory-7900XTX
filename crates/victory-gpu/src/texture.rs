@@ -1657,18 +1657,33 @@ fn readable(at: usize, len: usize, all: bool) -> (usize, usize) {
 }
 
 fn committed_by_query(at: *const u8, len: usize) -> bool {
-    use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEMORY_BASIC_INFORMATION, VirtualQuery};
+    use windows_sys::Win32::System::Memory::{
+        MEM_COMMIT, MEMORY_BASIC_INFORMATION, PAGE_GUARD, PAGE_NOACCESS, VirtualQuery,
+    };
     let mut p = at as usize;
-    let end = p + len;
+    // An address at the end of the space, given a length, wraps in release
+    // builds; such a range is never ours to read.
+    let Some(end) = p.checked_add(len) else {
+        return false;
+    };
     while p < end {
         // SAFETY: plain data filled in by the query.
         let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
         // SAFETY: a valid out pointer of the right size.
         let n = unsafe { VirtualQuery(p as *const _, &mut info, size_of_val(&info)) };
-        if n == 0 || info.State != MEM_COMMIT {
+        // A committed page with no read access (or a guard page) is not
+        // readable, which is what the callers ask here.
+        let unreadable =
+            info.Protect == 0 || info.Protect & (PAGE_NOACCESS | PAGE_GUARD) != 0;
+        if n == 0 || info.State != MEM_COMMIT || unreadable {
             return false;
         }
-        p = info.BaseAddress as usize + info.RegionSize;
+        // A region that does not move the walk forward would spin forever.
+        let next = (info.BaseAddress as usize).saturating_add(info.RegionSize);
+        if next <= p {
+            return false;
+        }
+        p = next;
     }
     true
 }
@@ -1956,6 +1971,34 @@ mod title_memory_tests {
                 assert_ne!(VirtualFree(base.cast(), 0, MEM_RELEASE), 0);
             }
         }
+    }
+
+    /// The `VirtualQuery` path of [`super::committed`] refuses a range that
+    /// wraps the address space, a page that is committed but cannot be read,
+    /// and a query whose region does not move the walk forward (after
+    /// Marvisak/VIctory 4fc9d70f).
+    #[test]
+    fn committed_by_query_rejects_unreadable_and_wrapping_ranges() {
+        use windows_sys::Win32::System::Memory::{
+            MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_NOACCESS, PAGE_READWRITE, VirtualAlloc,
+            VirtualFree,
+        };
+        assert!(!super::committed_by_query(usize::MAX as *const u8, 16));
+        // SAFETY: our own page, freed below.
+        let noaccess =
+            unsafe { VirtualAlloc(std::ptr::null(), 4096, MEM_RESERVE | MEM_COMMIT, PAGE_NOACCESS) };
+        assert!(!noaccess.is_null());
+        assert!(!super::committed_by_query(noaccess.cast::<u8>(), 4096));
+        // SAFETY: freeing the page above.
+        assert_ne!(unsafe { VirtualFree(noaccess, 0, MEM_RELEASE) }, 0);
+        // A readable committed page still answers yes.
+        // SAFETY: our own page, freed below.
+        let rw =
+            unsafe { VirtualAlloc(std::ptr::null(), 4096, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE) };
+        assert!(!rw.is_null());
+        assert!(super::committed_by_query(rw.cast::<u8>(), 4096));
+        // SAFETY: freeing the page above.
+        assert_ne!(unsafe { VirtualFree(rw, 0, MEM_RELEASE) }, 0);
     }
 }
 
