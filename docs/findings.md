@@ -116,20 +116,26 @@ sampler filters, fences, the loader's `clzero` edge cases and the census.
 
 Not taken: patches whose code this fork does not carry (the page table and
 `alias_source`, `Tracked::saved`, `shared_texture`, pipeline stream reads),
-Belobug's shader clean-up passes, and fxceless' `VICTORY_ABSENT_ONCE`: its
-`watch.rs` has since been rewritten here around published bits. They need
-ports of their own, not a cherry-pick.
+Belobug's shader clean-up passes. They need ports of their own, not a
+cherry-pick.
 
 None of these changes was measured on the 7900 XTX. They are
 correctness fixes and tests, kept behind the code paths they touch; the
 Windows CI is their check until they are run in the title.
 
-Two more were carried over by hand where the fork's code had moved on:
+Three more were carried over by hand where the fork's code had moved on:
 `committed_by_query` now refuses a wrapping range, a committed page without
 read access and a query that does not advance, as in Marvisak 4fc9d70f (the
-`Staging::detile` half of that fix was already here); and a failed swap chain
+`Staging::detile` half of that fix was already here); a failed swap chain
 creation or resize waits a second before asking DXGI again, with success
-clearing the wait, as in Marvisak f0967745.
+clearing the wait, as in Marvisak f0967745; and fxceless' `VICTORY_ABSENT_ONCE`
+is in, adapted to this tree's published-bit guards. Off by default, it keeps
+a 100 ms note (`VICTORY_ABSENT_MS`) of a block Windows said is uncommitted, so
+the submitting thread does not ask about it every frame; a mapping the
+runtime tells of clears the note at once. `VICTORY_ABSENT_ONCE=alt` switches
+between twenty seconds on and twenty off, and says the question counts at
+each change. Like fxceless' own test, ours is a device-free test on our own
+placeholders: it has not been run in the title.
 
 ## The other repositories, compared
 
