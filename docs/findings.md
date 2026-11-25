@@ -95,6 +95,35 @@ in that order of size:
 5. Memory, 40-46 GB private: lists' allocators 9 GB, windows 7, uploads 4
    (`VICTORY_MEMORY_MAP=1` lists it).
 
+## Upstream fixes taken after the fork's base (2026-11-25)
+
+Twenty-nine commits from Marvisak/VIctory that postdate this fork's base are
+in this tree, with their authors and source commits kept. A thirtieth, a
+scalar-quadmask test, was tried and reverted: the fork already had that test.
+They are fixes and
+tests that met the same code here: a null CBV description now clears the slot
+instead of leaving a stale view; a typed unordered view in a format the host
+cannot store to is refused; placed descriptor heaps are released before their
+test memory is reused; HDR and 8-bit captures keep NaNs, integer contrast and
+their alpha range; a failed XAsync call runs its cleanup without the
+completion lock; xmem keeps the space below 4 GiB for the title's 32-bit
+allocations; a cache-publish race accepts the existing entry; unreadable
+files are reported by `victory census`; a policy violation makes
+`victory config` exit nonzero; crash reports are appended as whole records;
+password text entry is masked; and whole-wave `v_add_f16` inline constants
+are decoded. The rest are new tests for the shader translator, XMA, BC1,
+sampler filters, fences, the loader's `clzero` edge cases and the census.
+
+Not taken: patches whose code this fork does not carry (the page table and
+`alias_source`, `Tracked::saved`, `shared_texture`, pipeline stream reads),
+Belobug's shader clean-up passes, and fxceless' `VICTORY_ABSENT_ONCE`: its
+`watch.rs` has since been rewritten here around published bits. They need
+ports of their own, not a cherry-pick.
+
+None of these changes was measured on the 7900 XTX. They are
+correctness fixes and tests, kept behind the code paths they touch; the
+Windows CI is their check until they are run in the title.
+
 ## The other repositories, compared
 
 Read up to 2026-11-25: Marvisak/VIctory, fxceless/victory-fork, DexNom/VIctory,
