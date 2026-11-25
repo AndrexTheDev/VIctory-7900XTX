@@ -113,9 +113,10 @@ files are reported by `victory census`; a policy violation makes
 `victory config` exit nonzero; crash reports are appended as whole records;
 password text entry is masked; whole-wave `v_add_f16` inline constants are
 decoded; `--jobs 0` is refused by the CLI; and an all-zero report from a
-wireless receiver is not taken for a connected pad. The rest are new tests for the
-shader translator, XMA, BC1, sampler filters, fences, the loader's `clzero`
-edge cases and the census.
+wireless receiver is not taken for a connected pad, and the early pipeline
+list makes room by dropping the oldest runs' keys rather than arbitrary ones.
+The rest are new tests for the shader translator, XMA, BC1, sampler filters,
+fences, the loader's `clzero` edge cases and the census.
 
 Not taken: patches whose code this fork does not carry (the page table and
 `alias_source`, `Tracked::saved`, `shared_texture`, pipeline stream reads),
