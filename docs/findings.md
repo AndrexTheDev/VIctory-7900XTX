@@ -139,6 +139,10 @@ between twenty seconds on and twenty off, and says the question counts at
 each change. Like fxceless' own test, ours is a device-free test on our own
 placeholders: it has not been run in the title.
 
+Marvisak's exit-status fix is carried over too: `victory run --execute` now
+passes the title's full 32-bit exit status through to the shell instead of
+always reporting success; not executing still reports zero.
+
 ## The other repositories, compared
 
 Read up to 2026-11-25: Marvisak/VIctory, fxceless/victory-fork, DexNom/VIctory,
