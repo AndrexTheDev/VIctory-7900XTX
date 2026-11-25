@@ -13,6 +13,7 @@ mod translate;
 #[cfg(windows)]
 mod warm;
 
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -85,9 +86,9 @@ enum Command {
         /// Print one line per program and outcome.
         #[arg(long)]
         list: bool,
-        /// Worker threads (default: every logical core).
+        /// Positive worker thread count (default: every logical core).
         #[arg(long)]
-        jobs: Option<usize>,
+        jobs: Option<NonZeroUsize>,
         /// Warm the run's shader cache: a file of shader hashes (the 16
         /// hex digits a run's log names a shader by, anywhere in a line);
         /// the containers with those hashes are translated into the
@@ -101,9 +102,9 @@ enum Command {
     /// of the translator.
     Shaders {
         paths: Vec<PathBuf>,
-        /// Worker threads (default: every logical core).
+        /// Positive worker thread count (default: every logical core).
         #[arg(long)]
-        jobs: Option<usize>,
+        jobs: Option<NonZeroUsize>,
     },
     /// Make the host pipelines of every pipeline the title ever created
     /// (runs with `VICTORY_PIPELINE_BOOK=1` write them down), so that the
@@ -111,9 +112,9 @@ enum Command {
     /// of the translator or the driver. Goes on where it was stopped.
     #[cfg(windows)]
     Warm {
-        /// Processes at once (default: two thirds of the logical cores).
+        /// Positive number of processes at once (default: two thirds of the logical cores).
         #[arg(long)]
-        jobs: Option<usize>,
+        jobs: Option<NonZeroUsize>,
         /// At most this many pipelines.
         #[arg(long)]
         limit: Option<usize>,
@@ -209,13 +210,13 @@ fn main() -> Result<()> {
                 victory_shader::emit::set_host_max_wave(n);
             }
             if let Some(file) = warm {
-                return translate::warm(paths, &file, jobs);
+                return translate::warm(paths, &file, jobs.map(NonZeroUsize::get));
             }
-            translate::run(paths, validate, pipelines, list, jobs)
+            translate::run(paths, validate, pipelines, list, jobs.map(NonZeroUsize::get))
         }
-        Command::Shaders { paths, jobs } => translate::precompile(paths, jobs),
+        Command::Shaders { paths, jobs } => translate::precompile(paths, jobs.map(NonZeroUsize::get)),
         #[cfg(windows)]
-        Command::Warm { jobs, limit, again, used, these } => warm::run(jobs, limit, again, used, these),
+        Command::Warm { jobs, limit, again, used, these } => warm::run(jobs.map(NonZeroUsize::get), limit, again, used, these),
         Command::Run {
             exe,
             unimplemented,
