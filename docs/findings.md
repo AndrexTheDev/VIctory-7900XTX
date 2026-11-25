@@ -112,7 +112,8 @@ allocations; a cache-publish race accepts the existing entry; unreadable
 files are reported by `victory census`; a policy violation makes
 `victory config` exit nonzero; crash reports are appended as whole records;
 password text entry is masked; whole-wave `v_add_f16` inline constants are
-decoded; and `--jobs 0` is refused by the CLI. The rest are new tests for the
+decoded; `--jobs 0` is refused by the CLI; and an all-zero report from a
+wireless receiver is not taken for a connected pad. The rest are new tests for the
 shader translator, XMA, BC1, sampler filters, fences, the loader's `clzero`
 edge cases and the census.
 
